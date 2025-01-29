@@ -7,6 +7,9 @@ import os
 import win32com.client as win32
 import re
 import concurrent.futures
+from whoosh.index import create_in, open_dir
+from whoosh.fields import Schema, TEXT, ID, NUMERIC
+from whoosh.qparser import QueryParser, RegexPlugin
 
 class FindAllDocXFiles(QThread):
     progress_update = pyqtSignal(int, int)
@@ -52,7 +55,6 @@ class SearchWordsThread(QThread):
 
     def __init__(self, parent, search_term, word_search_option):
         super().__init__()
-        # self.queue = queue
         self.parent = parent
         self.search_term = search_term
         self.word_search_option = word_search_option
@@ -69,31 +71,31 @@ class SearchWordsThread(QThread):
         self.run()
     
     def run(self):
-        word_docs = self.word_docs
-        num_files = len(word_docs)
-        num_processed = 0
-        self.progress_update.emit(num_processed, num_files)
+        with self.parent.ix.searcher() as searcher:
+            query_parser = QueryParser("content", schema=self.parent.ix.schema)
+            query_parser.add_plugin(RegexPlugin())
+            search_terms = self.search_term
+            if "ignore_whitespace" in self.word_search_option:
+                search_terms = [r'\s*'.join(term) for term in self.search_term.split()]
+            if "words_together" in self.word_search_option:
+                search_terms = ' AND '.join(self.search_term.split())
+            query = query_parser.parse(search_terms)
+            
+            results = searcher.search(query, limit=None)
+            total_results = len(results)
+            
+            for i, result in enumerate(results):
+                if self.cancelled:
+                    break
+                self.results = {}
+                title = result['title']
+                path = result['path']
+                paragraph_index = result['paragraph_number']
+                if (title, path) not in self.results:
+                    self.results[(title, path)] = []
+                self.results[(title, path)].append(paragraph_index)
+                self.progress_update.emit(i + 1, total_results)
 
-        futures = []
-        for word_doc in word_docs:
-            if self.cancelled:
-                break
-            if self.word_search_option:
-                future = self.executor.submit(self.search_words_separately, word_doc, self.search_term)
-            else:
-                future = self.executor.submit(self.search_words_together, word_doc, self.search_term)
-            futures.append(future)
-        
-        for future in concurrent.futures.as_completed(futures):
-            if self.cancelled:
-                break
-            result = future.result()
-            if result is not None:
-                self.results.append((os.path.basename(result), result.replace('/', '\\')))
-            num_processed += 1
-            self.progress_update.emit(num_processed, num_files)
-    
-        self.executor.shutdown(wait=True, cancel_futures=True)
         self.finished.emit()
     
     def cancel(self):
@@ -164,17 +166,14 @@ class ProgressDialog(QDialog):
         self.cancelled.emit()
 
 class DocumentItartor:
-    def __init__(self, document, search_terms, search_by_word, range=1) -> None:
+    def __init__(self, document, paragraph_indices, range=1) -> None:
         with open(document, 'rb') as f:
             document = Document(f)
             body = document._body._body
             self.paragraphs = body.xpath(".//w:p")
 
-        self.found_indices = []
-        self.search_terms = search_terms
-        self.search_by_word = search_by_word
+        self.found_indices = paragraph_indices
         self.current_index = 0
-        self.iterator = self.find_next()
         self.range = range
         self.previous_paragraph = None
         self.current_paragraph = self.get_paragraph_at(0)
@@ -195,29 +194,7 @@ class DocumentItartor:
     def get_paragraph_at(self, index):
         if 0 <= index < len(self.found_indices):
             return self.get_inrange_paragraphs(self.found_indices[index])
-        if index >= len(self.found_indices):
-            try:
-                i = next(self.iterator)
-            except StopIteration:
-                return None
-            self.found_indices.append(i)
-            return self.get_inrange_paragraphs(i)
         return None
-    
-    def find_next(self):
-        for i in range(len(self.paragraphs)):
-            p = self.paragraphs[i]
-            paragraph = Paragraph(p, None)
-            paragraph_without_spaces = paragraph.text.replace(" ", "").lower()
-            if self.search_by_word:
-                words = self.search_terms.split()
-                if all(word.lower() in paragraph_without_spaces for word in words):
-                    yield i
-            else:
-                pattern = self.search_terms.replace(" ", "").lower()
-                match = re.search(pattern, paragraph_without_spaces)
-                if match:
-                    yield i
     
     def get_inrange_paragraphs(self, index):
         if index < 0 or index >= len(self.paragraphs):
@@ -313,9 +290,8 @@ class MainWindow(QMainWindow):
         self.layout.addWidget(self.results_label)
 
         # Default options to False
-        self.word_search_option = False
+        self.word_search_option = {"same_paragraph", "ignore_whitespace"}
         self.search_again_option = False
-        self.highlight_option = False
 
         # Default variables
         self.file_list = []
@@ -346,6 +322,31 @@ class MainWindow(QMainWindow):
         
         self.prev_button.clicked.connect(self.prev_paragraph)
         self.next_button.clicked.connect(self.next_paragraph)
+    
+    def initialize_whoosh_index(self):
+        schema = Schema(title=TEXT(stored=True), path=ID(stored=True), content=TEXT, paragraph_number=NUMERIC(stored=True))
+        if not os.path.exists("indexdir"):
+            os.mkdir("indexdir")
+            self.ix = create_in("indexdir", schema)
+        else:
+            self.ix = open_dir("indexdir")
+
+    def update_whoosh_index(self, file_list):
+        writer = self.ix.writer()
+        for file_path in file_list:
+            try:
+                doc = Document(file_path)
+                for i, paragraph in enumerate(doc.paragraphs):
+                    content = paragraph.text
+                    writer.add_document(
+                        title=os.path.basename(file_path),
+                        path=file_path,
+                        content=content,
+                        paragraph_number=i
+                    )
+            except Exception as e:
+                print(f"Error indexing {file_path}: {e}")
+        writer.commit()
 
     def search_word_docs(self):
         # Get search term from textbox
@@ -382,16 +383,16 @@ class MainWindow(QMainWindow):
         if not self.search_again_option:
             # Open directory dialog to select directory to search
             dir_path = QFileDialog.getExistingDirectory(self, 'Open Directory', self.last_directory)
+            print("dir path: ", dir_path)
             locator = FindAllDocXFiles(self, dir_path)
             locator.moveToThread(thread)
             locator.progress_update.connect(progress_dialog.update_progress)
-            locator.finished.connect(worker.add_file_list_and_run)
+            locator.finished.connect(self.update_whoosh_index)
             progress_dialog.cancelled.connect(lambda: self.cancel_search(locator))
             thread.started.connect(locator.run)
             # Set last directory to this search
             self.last_directory = dir_path
         else:
-            worker.add_file_list(self.file_list)
             thread.started.connect(worker.run)
 
         thread.start()
@@ -405,9 +406,10 @@ class MainWindow(QMainWindow):
     def show_results(self, results):
         # Display results in table
         self.table.setRowCount(len(results))
-        for i, (file_name, path) in enumerate(results):
+        for i, ((file_name, path), paragraph_index) in enumerate(results):
             self.table.setItem(i, 0, QTableWidgetItem(file_name))
             self.table.setItem(i, 1, QTableWidgetItem(path))
+            self.table.item(i, 0).setData(Qt.ItemDataRole.UserRole, paragraph_index)
         
         for row in range(self.table.rowCount()):
             for col in range(self.table.columnCount()):
@@ -419,7 +421,7 @@ class MainWindow(QMainWindow):
         self.search_button.setEnabled(True)
 
         # Save results
-        self.file_list = [result[1] for result in results]
+        self.file_list = [result[0][1] for result in results]
     
     def show_single_doc_search(self, row, col):
         # don't start from beginning if already in the row
@@ -428,7 +430,8 @@ class MainWindow(QMainWindow):
         self.current_row = row
 
         file_path = self.table.item(row, 1).text()
-        self.doc_paragraphs = DocumentItartor(file_path, self.search_term, self.word_search_option)
+        paragraph_indices = self.table.item(row,0).data(Qt.UserRole)
+        self.doc_paragraphs = DocumentItartor(file_path, paragraph_indices)
         self.display_paragraph()
         self.doc_text_nav.setVisible(True)
 
@@ -500,13 +503,8 @@ class MainWindow(QMainWindow):
         self.display_paragraph()
 
     def open_doc(self, row, col):
-        # Get search term from textbox
-        # search_term = self.textbox.text()
-
         file_path = self.table.item(row, 1).text()
-        # print(file_path)
 
-        # word.Visible = True
         try:
             # Open Word document and highlight search term
             word_doc = win32.gencache.EnsureDispatch('Word.Application')
@@ -522,46 +520,6 @@ class MainWindow(QMainWindow):
             word_doc.Visible = True
             word_doc.Activate()
 
-            # doc_content = doc.Content
-            # first_occurence = True
-
-            # for p in doc_content.Paragraphs:
-            #     words = search_term.split()
-            #     paragraph_text = p.Range.Text.strip()
-
-            #     if self.word_search_option:
-            #         if all(word in paragraph_text for word in words):
-            #             # Highlight all occurrences of the words within the paragraph
-            #             search_range = p.Range
-            #             search_range.Find.ClearFormatting()
-            #             search_range.Find.Forward = True
-            #             if first_occurence:
-            #                 search_range.Find.Execute(words[0], MatchWholeWord=False, MatchCase=False, MatchWildcards=False)
-            #                 search_range.Select()
-            #                 first_occurence = False
-
-            #             if self.highlight_option:
-            #                 search_range = p.Range
-            #                 search_range.Find.ClearFormatting()
-            #                 for word in words:
-            #                     search_range.Find.Replacement.Highlight = True
-            #                     search_range.Find.Execute(word, Replace=2, MatchWholeWord=False, MatchCase=False, MatchWildcards=False)
-                
-            #     else:
-            #         pattern = re.compile("\s*".join(words))
-            #         match = re.search(pattern, paragraph_text)
-            #         if match:
-            #             search_range = p.Range
-            #             search_range.Find.ClearFormatting()
-            #             search_range.Find.Execute(match.group(), MatchWholeWord=False, MatchCase=False, MatchWildcards=False)
-            #             if first_occurence:
-            #                 search_range.Select()
-            #                 first_occurence = False
-            #             if self.highlight_option:
-            #                 search_range.HighlightColorIndex = win32.constants.wdYellow
-            #             else:
-            #                 break
-
         except Exception as ex:
             print('Error while opening doc.')
             message_box = QMessageBox()
@@ -572,13 +530,13 @@ class MainWindow(QMainWindow):
             message_box.exec_()
 
     def update_word_search_option(self):
-        self.word_search_option = self.word_checkbox.isChecked()
+        if self.word_checkbox.isChecked():
+            self.word_search_option.add("words_together") 
+        else:
+            self.word_search_option.remove("words_together")
 
     def update_search_again_option(self):
         self.search_again_option = self.search_again_checkbox.isChecked()
-
-    def update_highlight_option(self):
-        self.highlight_option = self.highlight_checkbox.isChecked()
     
     def setup_ui(self):
         pass
@@ -589,6 +547,7 @@ if __name__ == '__main__':
 
     # Create the main window
     window = MainWindow()
+    window.initialize_whoosh_index()
 
     # Set up the user interface
     window.setup_ui()

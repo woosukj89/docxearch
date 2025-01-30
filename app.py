@@ -1,15 +1,17 @@
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QCheckBox, QMessageBox, QHeaderView, QProgressBar, QDialog, QTextBrowser
 from PyQt5.QtGui import QTextCursor, QFont, QTextCharFormat, QColor, QBrush, QTextDocument
-from PyQt5.QtCore import Qt, QRect, QThread, pyqtSignal, QRegularExpression, pyqtSlot, QTimer, QMetaObject, Q_ARG
+from PyQt5.QtCore import Qt, QRect, QThread, pyqtSignal, QRegularExpression, pyqtSlot
 from docx import Document
 from docx.text.paragraph import Paragraph
 import os
 import win32com.client as win32
-import re
 import concurrent.futures
 from whoosh.index import create_in, open_dir
 from whoosh.fields import Schema, TEXT, ID, NUMERIC
 from whoosh.qparser import QueryParser, RegexPlugin
+from whoosh.query import Term
+from whoosh.writing import AsyncWriter
+from threading import Lock
 
 class FindAllDocXFiles(QThread):
     progress_update = pyqtSignal(int, int)
@@ -21,6 +23,7 @@ class FindAllDocXFiles(QThread):
         self.dir_path = dir_path
         self.word_docs = []
         self.cancelled = False
+        self.lock = Lock()  # Lock for synchronizing writer access
     
     def run(self):
         # Search for Word documents in directory
@@ -44,7 +47,66 @@ class FindAllDocXFiles(QThread):
             self.finished.emit()
             return
         
+        self.update_found_files_index(self.word_docs)
+        
         self.finished.emit(self.word_docs)
+
+    def update_found_files_index(self, file_list, batch_size=100):
+        num_files = len(file_list)
+        num_processed = 0
+        self.progress_update.emit(num_processed, num_files)
+        writer = self.parent.ix.writer()
+        writer = None
+        try:
+            for batch_start in range(0, len(file_list), batch_size):
+                # Open a writer for each batch
+                if writer is None:
+                    writer = self.parent.ix.writer()  # Adjust `limitmb` for memory control
+
+                # Get the current batch of files
+                batch = file_list[batch_start:batch_start + batch_size]
+
+                for file_path in batch:
+                    with self.parent.ix.searcher() as searcher:
+                        if self.cancelled:
+                            break
+                        query = Term("path", file_path)
+                        results = searcher.search(query, limit=1)
+                        
+                        if not results:  # If results are not found, index the file
+                            self.update_whoosh_index(writer, file_path)
+                        else:
+                            print(f"File already indexed: {file_path}")
+                        
+                        num_processed += 1
+
+                writer.commit()
+                self.progress_update.emit(num_processed, num_files)
+                    
+        except Exception as e:
+            print(f"Error during indexing: {e}")
+            if writer:
+                writer.cancel()  # Cancel the writer in case of an error
+        finally:
+            if writer:
+                writer.commit()  # Ensure any remaining changes are committed
+        
+    def update_whoosh_index(self, writer, file_path):
+        try:
+            doc = Document(file_path)
+            for i, paragraph in enumerate(doc.paragraphs):
+                content = paragraph.text
+
+                # Use a lock to synchronize access to the writer
+                with self.lock:
+                    writer.add_document(
+                        title=os.path.basename(file_path),
+                        path=file_path,
+                        content=content,
+                        paragraph_number=i
+                    )
+        except Exception as e:
+            print(f"Error indexing {file_path}: {e}")
     
     def cancel(self):
         self.cancelled = True
@@ -76,12 +138,13 @@ class SearchWordsThread(QThread):
             query_parser.add_plugin(RegexPlugin())
             search_terms = self.search_term
             if "ignore_whitespace" in self.word_search_option:
-                search_terms = [r'\s*'.join(term) for term in self.search_term.split()]
+                search_terms = ' '.join([r'\s*'.join(term) for term in self.search_term.split()])
             if "words_together" in self.word_search_option:
                 search_terms = ' AND '.join(self.search_term.split())
             query = query_parser.parse(search_terms)
             
             results = searcher.search(query, limit=None)
+            print("results\n", results)
             total_results = len(results)
             
             for i, result in enumerate(results):
@@ -331,23 +394,6 @@ class MainWindow(QMainWindow):
         else:
             self.ix = open_dir("indexdir")
 
-    def update_whoosh_index(self, file_list):
-        writer = self.ix.writer()
-        for file_path in file_list:
-            try:
-                doc = Document(file_path)
-                for i, paragraph in enumerate(doc.paragraphs):
-                    content = paragraph.text
-                    writer.add_document(
-                        title=os.path.basename(file_path),
-                        path=file_path,
-                        content=content,
-                        paragraph_number=i
-                    )
-            except Exception as e:
-                print(f"Error indexing {file_path}: {e}")
-        writer.commit()
-
     def search_word_docs(self):
         # Get search term from textbox
         self.search_term = self.textbox.text().strip()
@@ -387,7 +433,7 @@ class MainWindow(QMainWindow):
             locator = FindAllDocXFiles(self, dir_path)
             locator.moveToThread(thread)
             locator.progress_update.connect(progress_dialog.update_progress)
-            locator.finished.connect(self.update_whoosh_index)
+            locator.finished.connect(worker.run)
             progress_dialog.cancelled.connect(lambda: self.cancel_search(locator))
             thread.started.connect(locator.run)
             # Set last directory to this search

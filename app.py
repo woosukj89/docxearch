@@ -51,45 +51,28 @@ class FindAllDocXFiles(QThread):
         
         self.finished.emit(self.word_docs)
 
-    def update_found_files_index(self, file_list, batch_size=100):
+    def update_found_files_index(self, file_list):
         num_files = len(file_list)
         num_processed = 0
         self.progress_update.emit(num_processed, num_files)
         writer = self.parent.ix.writer()
-        writer = None
-        try:
-            for batch_start in range(0, len(file_list), batch_size):
-                # Open a writer for each batch
-                if writer is None:
-                    writer = self.parent.ix.writer()  # Adjust `limitmb` for memory control
-
-                # Get the current batch of files
-                batch = file_list[batch_start:batch_start + batch_size]
-
-                for file_path in batch:
-                    with self.parent.ix.searcher() as searcher:
-                        if self.cancelled:
-                            break
-                        query = Term("path", file_path)
-                        results = searcher.search(query, limit=1)
-                        
-                        if not results:  # If results are not found, index the file
-                            self.update_whoosh_index(writer, file_path)
-                        else:
-                            print(f"File already indexed: {file_path}")
-                        
-                        num_processed += 1
-
-                writer.commit()
+        for file_path in file_list:
+            with self.parent.ix.searcher() as searcher:
+                if self.cancelled:
+                    writer.cancel()
+                    break
+                query = Term("path", file_path)
+                results = searcher.search(query, limit=1)
+                
+                if not results:  # If results are not found, index the file
+                    self.update_whoosh_index(writer, file_path)
+                else:
+                    print(f"File already indexed: {file_path}")
+                
+                num_processed += 1
                 self.progress_update.emit(num_processed, num_files)
-                    
-        except Exception as e:
-            print(f"Error during indexing: {e}")
-            if writer:
-                writer.cancel()  # Cancel the writer in case of an error
-        finally:
-            if writer:
-                writer.commit()  # Ensure any remaining changes are committed
+
+        writer.commit()
         
     def update_whoosh_index(self, writer, file_path):
         try:

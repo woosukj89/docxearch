@@ -1,0 +1,61 @@
+class SearchWordsThread(QThread):
+    progress_update = pyqtSignal(int, int)
+    finished = pyqtSignal()
+
+    def __init__(self, parent, search_term, word_search_option):
+        super().__init__()
+        self.parent = parent
+        self.search_term = search_term
+        self.word_search_option = word_search_option
+        self.cancelled = False
+        self.results = []
+
+    def run(self):
+        with self.parent.ix.searcher() as searcher:
+            query_parser = QueryParser("content", schema=self.parent.ix.schema)
+            if self.word_search_option:
+                query = query_parser.parse(' AND '.join(self.search_term.split()))
+            else:
+                query = query_parser.parse(self.search_term)
+            
+            results = searcher.search(query, limit=None)
+            total_results = len(results)
+            
+            for i, result in enumerate(results):
+                if self.cancelled:
+                    break
+                self.results.append((result['title'], result['path']))
+                self.progress_update.emit(i + 1, total_results)
+
+        self.finished.emit()
+
+    def cancel(self):
+        self.cancelled = True
+
+
+def search_word_docs(self):
+    # ... (keep the existing code for input validation and UI setup)
+
+    if not self.search_again_option:
+        # Open directory dialog to select directory to search
+        dir_path = QFileDialog.getExistingDirectory(self, 'Open Directory', self.last_directory)
+        locator = FindAllDocXFiles(self, dir_path)
+        locator.moveToThread(thread)
+        locator.progress_update.connect(progress_dialog.update_progress)
+        locator.finished.connect(self.update_index_and_search)
+        progress_dialog.cancelled.connect(lambda: self.cancel_search(locator))
+        thread.started.connect(locator.run)
+        # Set last directory to this search
+        self.last_directory = dir_path
+    else:
+        thread.started.connect(worker.run)
+
+    thread.start()
+    progress_dialog.exec_()
+
+def update_index_and_search(self, file_list):
+    self.update_whoosh_index(file_list)
+    worker = SearchWordsThread(self, self.search_term, self.word_search_option)
+    worker.moveToThread(QThread.currentThread())
+    worker.finished.connect(lambda: self.show_results(worker.results))
+    worker.run()

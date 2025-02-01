@@ -4,9 +4,11 @@ from PyQt5.QtCore import Qt, QRect, QThread, pyqtSignal, QRegularExpression, pyq
 from docx import Document
 from docx.text.paragraph import Paragraph
 import os
+import sys
 import win32com.client as win32
 import re
 import concurrent.futures
+import json
 
 class FindAllDocXFiles(QThread):
     progress_update = pyqtSignal(int, int)
@@ -420,6 +422,39 @@ class MainWindow(QMainWindow):
 
         # Save results
         self.file_list = [result[1] for result in results]
+        self.save_results(results)
+    
+    def get_application_path(self):
+        if getattr(sys, 'frozen', False):
+            # If the application is run as a bundle, use the sys._MEIPASS path
+            application_path = sys._MEIPASS
+        else:
+            # If it's not bundled, use the directory of the script
+            application_path = os.path.dirname(os.path.abspath(__file__))
+        return application_path
+    
+    def save_results(self, results):
+        data = [{"file_name": file_name, "path": path} for file_name, path in results]
+        application_path = self.get_application_path()
+        json_path = os.path.join(application_path, "search_results.json")
+        with open(json_path, "w") as f:
+            json.dump(data, f)
+    
+    def load_results(self):
+        application_path = self.get_application_path()
+        json_path = os.path.join(application_path, "search_results.json")
+        try:
+            with open(json_path, "r") as f:
+                data = json.load(f)
+            return [(item["file_name"], item["path"]) for item in data]
+        except FileNotFoundError:
+            return []
+
+    def load_previous_results(self):
+        results = self.load_results()
+        if results:
+            self.show_results(results)
+        self.file_list = [result[1] for result in results]
     
     def show_single_doc_search(self, row, col):
         # don't start from beginning if already in the row
@@ -595,6 +630,9 @@ if __name__ == '__main__':
 
     # Show the window
     window.show()
+
+    # Show previous results if any
+    window.load_previous_results()
 
     # Run the event loop
     app.exec_()

@@ -1,9 +1,11 @@
 # Docxearch
 Official name has changed a bit from original 'docsearch'. A bit of a word play with the fact that this application only searches through .docx file extensions.
 
-Docxearch is a search tool to search for words within Word (docx) files. It looks for terms occurring within the same paragraph. It also has an option to search for words separately, meaning each word separated by whitespace is found within a paragraph.
+Docxearch is a search tool to search for words within Word (docx) files. It looks for terms occurring within the same paragraph. It also has an option to search for words separately, meaning each word (separated by whitespace) is searched within a paragraph.
 
 ## Version Update
+### Version 2.4
+Removed the previous feature and replaced with 'Duplicate' functionality which opens a new window while copying the search results. This way, you can create multiple running windows based on different results.
 ### Version 2.3
 Added a feature to display last searched set of results upon rerun. This is to maintain history of results and also allow nested search by opening multiple windows.
 

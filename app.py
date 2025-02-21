@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QCheckBox, QMessageBox, QHeaderView, QProgressBar, QDialog, QTextBrowser
 from PyQt5.QtGui import QTextCursor, QFont, QTextCharFormat, QColor, QBrush, QTextDocument
-from PyQt5.QtCore import Qt, QRect, QThread, pyqtSignal, QRegularExpression, pyqtSlot, QTimer, QMetaObject, Q_ARG
+from PyQt5.QtCore import Qt, QRect, QThread, pyqtSignal, QRegularExpression, pyqtSlot, QPoint
 from docx import Document
 from docx.text.paragraph import Paragraph
 import os
@@ -8,7 +8,7 @@ import sys
 import win32com.client as win32
 import re
 import concurrent.futures
-import json
+import multiprocessing
 
 class FindAllDocXFiles(QThread):
     progress_update = pyqtSignal(int, int)
@@ -235,7 +235,7 @@ class DocumentItartor:
         return self.found_indices[self.current_index] if 0 <= self.current_index < len(self.found_indices) else -1
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, duplicate_results=None):
         super().__init__()
 
         # Set window title and size
@@ -312,7 +312,24 @@ class MainWindow(QMainWindow):
 
          # Create results label
         self.results_label = QLabel('')
-        self.layout.addWidget(self.results_label)
+        # Create duplicate button
+        self.duplicate_button = QPushButton('Duplicate')
+        self.duplicate_button.clicked.connect(self.create_duplicate_process)
+        self.duplicate_button.setStyleSheet("""
+            QPushButton {
+                padding: 5px 15px;
+            }
+        """)
+        self.duplicate_button.setFont(font)
+
+        # Create a horizontal layout for results label and duplicate button
+        results_layout = QHBoxLayout()
+        results_layout.addWidget(self.results_label)
+        results_layout.addStretch(1)  # This will push the button to the right
+        results_layout.addWidget(self.duplicate_button)
+
+        # Add the results layout to the main layout
+        self.layout.addLayout(results_layout)
 
         # Default options to False
         self.word_search_option = False
@@ -348,6 +365,12 @@ class MainWindow(QMainWindow):
         
         self.prev_button.clicked.connect(self.prev_paragraph)
         self.next_button.clicked.connect(self.next_paragraph)
+
+        # If duplicate_results is provided, populate the table
+        if duplicate_results:
+            self.show_results(duplicate_results)
+        else:
+            self.duplicate_button.hide()
 
     def search_word_docs(self):
         # Get search term from textbox
@@ -420,40 +443,9 @@ class MainWindow(QMainWindow):
 
         self.search_button.setEnabled(True)
 
-        # Save results
-        self.file_list = [result[1] for result in results]
-        self.save_results(results)
-    
-    def get_application_path(self):
-        if getattr(sys, 'frozen', False):
-            # If the application is run as a bundle, use the sys._MEIPASS path
-            application_path = sys._MEIPASS
-        else:
-            # If it's not bundled, use the directory of the script
-            application_path = os.path.dirname(os.path.abspath(__file__))
-        return application_path
-    
-    def save_results(self, results):
-        data = [{"file_name": file_name, "path": path} for file_name, path in results]
-        application_path = self.get_application_path()
-        json_path = os.path.join(application_path, "search_results.json")
-        with open(json_path, "w") as f:
-            json.dump(data, f)
-    
-    def load_results(self):
-        application_path = self.get_application_path()
-        json_path = os.path.join(application_path, "search_results.json")
-        try:
-            with open(json_path, "r") as f:
-                data = json.load(f)
-            return [(item["file_name"], item["path"]) for item in data]
-        except FileNotFoundError:
-            return []
+        self.duplicate_button.show()
 
-    def load_previous_results(self):
-        results = self.load_results()
-        if results:
-            self.show_results(results)
+        # Save results
         self.file_list = [result[1] for result in results]
     
     def show_single_doc_search(self, row, col):
@@ -615,10 +607,36 @@ class MainWindow(QMainWindow):
     def update_highlight_option(self):
         self.highlight_option = self.highlight_checkbox.isChecked()
     
+    def create_duplicate_process(self):
+        current_results = self.get_current_results()
+        new_position = self.get_new_window_position()
+        p = multiprocessing.Process(target=run_duplicate_window, args=(current_results, new_position))
+        p.start()
+
+    def get_new_window_position(self):
+        current_pos = self.pos()
+        return current_pos + QPoint(50, 50)
+
+    def get_current_results(self):
+        results = []
+        for row in range(self.table.rowCount()):
+            file_name = self.table.item(row, 0).text()
+            path = self.table.item(row, 1).text()
+            results.append((file_name, path))
+        return results
+    
     def setup_ui(self):
         pass
 
+def run_duplicate_window(results, position):
+    app = QApplication([])
+    new_window = MainWindow(duplicate_results=results)
+    new_window.move(position)
+    new_window.show()
+    app.exec_()
+
 if __name__ == '__main__':
+    multiprocessing.freeze_support()
     # Create the application
     app = QApplication([])
 
@@ -630,9 +648,6 @@ if __name__ == '__main__':
 
     # Show the window
     window.show()
-
-    # Show previous results if any
-    window.load_previous_results()
 
     # Run the event loop
     app.exec_()

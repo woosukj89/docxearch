@@ -1,0 +1,7 @@
+pyqt5
+python-docx
+faiss-cpu
+sentence-transformers
+ollama
+numpy
+pywin32

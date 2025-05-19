@@ -9,6 +9,7 @@ import win32com.client as win32
 import re
 import concurrent.futures
 import multiprocessing
+from AskAIWindow import AskAIWindow
 
 class FindAllDocXFiles(QThread):
     progress_update = pyqtSignal(int, int)
@@ -277,6 +278,9 @@ class MainWindow(QMainWindow):
         self.search_button.clicked.connect(self.search_word_docs)
         right_h_layout.addWidget(self.search_button)
         right_layout.addLayout(right_h_layout)
+        self.ask_ai_button = QPushButton('Ask AI')
+        self.ask_ai_button.clicked.connect(self.open_ask_ai_window)
+        right_h_layout.addWidget(self.ask_ai_button)
 
         # Add word checkbox
         options_layout = QHBoxLayout()
@@ -371,7 +375,20 @@ class MainWindow(QMainWindow):
             self.show_results(duplicate_results)
         else:
             self.duplicate_button.hide()
-
+    
+    def open_ask_ai_window(self):
+        question = self.textbox.text().strip()
+        if not question:
+            message_box = QMessageBox()
+            message_box.setWindowTitle("Error")
+            message_box.setText("Question can't be empty!")
+            message_box.setStandardButtons(QMessageBox.Ok)
+            message_box.setDefaultButton(QMessageBox.Ok)
+            message_box.exec_()
+            return
+        dir_path = QFileDialog.getExistingDirectory(self, 'Open Directory', self.last_directory)
+        self.create_ask_ai_process(dir_path, question)
+    
     def search_word_docs(self):
         # Get search term from textbox
         self.search_term = self.textbox.text().strip()
@@ -613,6 +630,10 @@ class MainWindow(QMainWindow):
         p = multiprocessing.Process(target=run_duplicate_window, args=(current_results, new_position))
         p.start()
 
+    def create_ask_ai_process(self, directory, question):
+        p = multiprocessing.Process(target=run_ask_ai_window, args=(directory, question))
+        p.start()
+
     def get_new_window_position(self):
         current_pos = self.pos()
         return current_pos + QPoint(50, 50)
@@ -632,6 +653,12 @@ def run_duplicate_window(results, position):
     app = QApplication([])
     new_window = MainWindow(duplicate_results=results)
     new_window.move(position)
+    new_window.show()
+    app.exec_()
+
+def run_ask_ai_window(directory, question):
+    app = QApplication([])
+    new_window = AskAIWindow(directory, question)
     new_window.show()
     app.exec_()
 

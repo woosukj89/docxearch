@@ -5,7 +5,7 @@ Docxearch is a search tool to search for words within Word (docx) files. It look
 
 ## Version Update
 ### Version 3.0
-**Release AI feature**: Now can use ollama model to autogenerate an answer based on documents indexed and searched through FAISS. Using Korean-optimized models for ollama as well as sentence-transformer.
+**Release AI feature**: Now can use OpenAI chat completion to autogenerate an answer based on documents indexed and searched through FAISS. 
 The new feature is usable in a new window which spawns on clicking "Ask AI".
 ### Version 2.4
 Removed the previous feature and replaced with 'Duplicate' functionality which opens a new window while copying the search results. This way, you can create multiple running windows based on different results.
@@ -30,10 +30,10 @@ To create the install file, run Inno Setup and open `docxearch_installer2.iss`. 
 pip install -r requirements.txt
 ```
 
-### 2. If using AI feature, make sure to download Ollama and pull model
-Install [Ollama](https://ollama.com/download)
+### 2. If using AI feature, make sure to add OpenAI api key to environment
+create a `.env` file under project path and add:
 ```
-ollama pull exaone3.5:2.4b
+OPENAI_API_KEY=your_api_key...
 ```
 
 ### 2. Run by executing app.py

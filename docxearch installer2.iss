@@ -35,6 +35,30 @@ Source: "C:\Users\woosu\Projects\Apps\doc search app\dist\docxearch\{#MyAppExeNa
 Source: "C:\Users\woosu\Projects\Apps\doc search app\dist\docxearch\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
+[Code]
+var
+  ApiKeyPage: TInputQueryWizardPage;
+
+procedure InitializeWizard();
+begin
+  ApiKeyPage := CreateInputQueryPage(wpSelectDir,
+    'OpenAI API Key', 'Enter your API key',
+    'Please enter your OpenAI API key below. This will be used by the app to access OpenAI services.');
+  ApiKeyPage.Add('API Key:', False);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  KeyFile: String;
+  KeyText: String;
+begin
+  if CurStep = ssPostInstall then begin
+    KeyFile := ExpandConstant('{app}\.env');
+    KeyText := 'OPENAI_API_KEY=' + ApiKeyPage.Values[0];
+    SaveStringToFile(KeyFile, KeyText, False);
+  end;
+end;
+
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon

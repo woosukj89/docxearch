@@ -26,9 +26,9 @@ class DocumentProcessor:
             body = doc._body._body
             ps = body.xpath(".//w:p")
             word_count = 0
-            text = ""
-            pre_overlap_text = ""
-            post_overlap_text = ""
+            text = []
+            pre_overlap_text = []
+            post_overlap_text = []
             start_index = 0
             overlap_index = 0
             for i, p in enumerate(ps):
@@ -39,7 +39,7 @@ class DocumentProcessor:
                 if word_count >= self.min_words + self.overlap:
                     # save text
                     self.indexer.add_document({
-                        "text": pre_overlap_text + text + post_overlap_text,
+                        "text": "\n    ".join(pre_overlap_text + text + post_overlap_text),
                         "metadata": {
                             "path": file_path,
                             "para_range": (start_index, i),
@@ -50,21 +50,21 @@ class DocumentProcessor:
                     # if self.debug: print(f"Adding chunk\n {pre_overlap_text + text + post_overlap_text}\n")
                     # change post to pre and reset
                     pre_overlap_text = post_overlap_text
-                    post_overlap_text = ""
-                    text = ""
+                    post_overlap_text = []
+                    text = []
                     word_count = 0
                     start_index = i - overlap_index
                     overlap_index = 0
                 elif word_count >= self.min_words:
-                    if paragraph.text.strip(): post_overlap_text += "\n    " + paragraph.text
+                    if paragraph.text.strip(): post_overlap_text.append(paragraph.text)
                     overlap_index += 1
                 else:
-                    if paragraph.text.strip(): text += "\n    " + paragraph.text
+                    if paragraph.text.strip(): text.append(paragraph.text)
             
             # add any remaining
-            if text.strip():
+            if len(text):
                 self.indexer.add_document({
-                    "text": pre_overlap_text + text + post_overlap_text,
+                    "text": "\n    ".join(pre_overlap_text + text + post_overlap_text),
                     "metadata": {
                         "path": file_path,
                         "para_range": (start_index, i),

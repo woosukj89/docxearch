@@ -39,6 +39,7 @@ exe = EXE(
     entitlements_file=None,
     icon=['bible.ico'],
 )
+
 coll = COLLECT(
     exe,
     a.binaries,

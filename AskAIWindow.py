@@ -8,7 +8,7 @@ from PyQt5.QtGui import QTextDocument
 from DocumentProcessor import DocumentProcessor
 from IndexSearch import IndexSearch
 from DocumentProcessor import DocumentProcessor
-import ollama
+from OpenAIHelper import OpenAIHelper
 
 class FileProcessingWorker(QObject):
     progress = pyqtSignal(int)
@@ -20,6 +20,7 @@ class FileProcessingWorker(QObject):
         self.directory = directory
         self.file_save_threshold = 50
         self.error_threshold = 5
+        self.file_processed = 0
 
     def run(self):
         dir_path = self.directory
@@ -43,10 +44,11 @@ class FileProcessingWorker(QObject):
                     processor.process_file(file_path)
                     # if number of files > 50, save
                     file_count +=1
+                    self.file_processed += 1
+                    self.progress.emit(self.file_processed)
                     if file_count > self.file_save_threshold:
                         processor.save_progress(dir_path)
                         file_count = 0
-                        self.progress.emit(file_count)
                 except Exception as e:
                     error_count += 1
                     if error_count > self.error_threshold:
@@ -55,18 +57,18 @@ class FileProcessingWorker(QObject):
                         return
         if file_count:
             processor.save_progress(dir_path)
-            self.progress.emit(file_count)
 
 class AIWorker(QObject):
     finished = pyqtSignal(str, list)  # response text and search results
     error = pyqtSignal(str)
 
-    def __init__(self, directory, query, searcher, processor):
+    def __init__(self, directory, query, searcher, processor, answerer):
         super().__init__()
         self.directory = directory
         self.query = query
         self.searcher = searcher
         self.processor = processor
+        self.answerer = answerer
 
     def run(self):
         try:
@@ -77,61 +79,9 @@ class AIWorker(QObject):
                 f"{'Author: ' + result['author'] if result.get('author') else ''}"
                 for i, result in enumerate(search_results)
             ])
-            # Prepare prompt
-    #         prompt = f"""아래 문맥에 제공된 문서만 사용하여 사용자의 질문에 답하세요. 모든 정보 뒤에 괄호 안의 숫자를 사용하여 출처를 인용해야 합니다(예: [0], [1], [2]). 끝에 각 문서를 어떻게 인용했는지 요약해 주세요.
-
-    # 문맥 (번호가 매겨진 문서들):
-    # {context}
-
-    # 질문: {self.query}
-
-    # 지침:
-    # 1. 제공된 문서에서만 정보 사용
-    # 2. 모든 인용 후에 [X] 형식을 사용하는 출처를 인용해야 합니다
-    # 3. 정보가 여러 문서에서 제공되는 경우 여러 인용문을 사용합니다(예: [0][1])
-    # 4. 인용문이 문맥 문서와 일치하는 숫자인지 확인합니다
-    # 5. 문서의 문자 그대로의 참조에는 따옴표를 사용합니다.
-    # 6. 인용을 건너뛰지 마세요 - 모든 정보에는 인용이 필요합니다
-    # 7. 정보를 구성하지 말고 문서에 있는 내용만 사용하세요
-
-    # 예시:
-    
-    # 기도하는 방법을 배우는 것은 "주변 환경과 경험"에 크게 의존합니다 [0]. 저자는 "부모님이나 기독교 가정에서 기도하는 모습"을 통해 배우거나, 교회에서 가르치는 기도의 예를 모방하는 것이 길이라고 가르칩니다 [1]. 예를 들어, 어린 시절부터 부모님이 기도하는 것을 보고 배운다면 그 습관을 유지하는 것이 도움이 될 수 있습니다 [2][3].
-
-    # [0] 주변 환경과 경헙을 통해 기도를 배우는 내용
-    # [1] 가족을 통해 기도를 배우는 모습
-    # [2] 기도 습관의 중요성
-    # [3] 부모님으로부터 기도를 배운 예시
-
-    # 정답:
-    # """
-            prompt = f"""Answer the user's question using ONLY the documents given in the context below. You MUST cite your sources using numbers in square brackets after EVERY piece of information (e.g., [0], [1], [2]). At the end, give a summary of which parts you used from each document. Please give your answer in Korean.
-
-Context (numbered documents):
-{context}
-
-Question: {self.query}
-
-Instructions:
-1. Use information ONLY from the provided documents
-2. You MUST cite sources using [X] format after EVERY claim
-3. Use multiple citations if information comes from multiple documents (e.g., [0][1])
-4. Make sure citations are numbers that match the context documents
-5. DO NOT skip citations - every piece of information needs a citation
-6. DO NOT make up information - only use what's in the documents
-
-Example format:
-기도하는 방법을 배우는 것은 "주변 환경과 경험"에 크게 의존합니다 [0]. 저자는 "부모님이나 기독교 가정에서 기도하는 모습"을 통해 배우거나, 교회에서 가르치는 기도의 예를 모방하는 것이 길이라고 가르칩니다 [1]. 예를 들어, 어린 시절부터 부모님이 기도하는 것을 보고 배운다면 그 습관을 유지하는 것이 도움이 될 수 있습니다 [2][3].
-
-[0] 주변 환경과 경헙을 통해 기도를 배우는 내용
-[1] 가족을 통해 기도를 배우는 모습
-[2] 기도 습관의 중요성
-[3] 부모님으로부터 기도를 배운 예시
-
-Answer:"""
-            print(f"Giving this as prompt:\n{prompt}")
-            response = ollama.generate(model='exaone3.5:2.4b', prompt=prompt)
-            self.finished.emit(response['response'], search_results)
+            # response = ollama.generate(model='exaone3.5:2.4b', prompt=prompt)
+            response = self.answerer.answer_with_context(self.query, context)
+            self.finished.emit(response, search_results)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -158,11 +108,12 @@ class AskAIWindow(QWidget):
 
         self.searcher = IndexSearch()
         self.processor = DocumentProcessor()
+        self.answerer = OpenAIHelper()
 
         # Follow-up input bar (goes at the bottom)
         followup_layout = QHBoxLayout()
         self.followup_input = QLineEdit()
-        self.followup_input.setPlaceholderText("후속 질문이 있으면 물어보세요.")
+        self.followup_input.setPlaceholderText("같은 경로에 추가 질문이 있으면 물어보세요.")
         self.followup_input.returnPressed.connect(self.followup_query)
         self.followup_button = QPushButton("Ask AI")
         self.followup_button.clicked.connect(self.followup_query)
@@ -194,7 +145,7 @@ class AskAIWindow(QWidget):
         # Count files in a blocking way (quick), or move this to thread too if slow
         total_files = self.count_docx_files(self.directory)
 
-        self.progress_dialog = QProgressDialog("폴더에서 파일을 처리하는 중입니다. 시간이 걸릴 수 있습니다. 이 작업은 폴더당 한 번만 수행하면 됩니다.", 
+        self.progress_dialog = QProgressDialog("폴더에서 문서를 처리하는 중입니다. 문서마다 1분 정도 소요됩니다. 이 작업은 폴더당 한 번만 수행합니다.", 
                                                None, 0, total_files, self)
         self.progress_dialog.setWindowModality(Qt.WindowModal)
         self.progress_dialog.setMinimumDuration(0)
@@ -242,7 +193,7 @@ class AskAIWindow(QWidget):
 
     def run_ai_query(self):
         self.ai_thread = QThread()
-        self.ai_worker = AIWorker(self.directory, self.query, self.searcher, self.processor)
+        self.ai_worker = AIWorker(self.directory, self.query, self.searcher, self.processor, self.answerer)
         self.ai_worker.moveToThread(self.ai_thread)
 
         self.ai_thread.started.connect(self.ai_worker.run)

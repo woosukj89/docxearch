@@ -4,3 +4,5 @@ indexdir/
 Output/
 test/
 test2/
+.env
+__pycache__/

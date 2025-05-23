@@ -1,1 +1,22 @@
-This program was developed by Joshua Woosuk Jang, who has given all rights of ownership to Jung Il Oh, for free use and distribution.
+Docxearch
+Copyright (c) 2025 [Joshua Jang]
+
+Permission is hereby granted, free of charge, to Jung Il Oh obtaining a copy of this software and associated documentation files (the "Software"), to use, copy, modify, and distribute the Software, subject to the following conditions:
+
+Non-Commercial Use Only
+The Software may be used for personal, educational, and research purposes only.
+
+Redistribution and Modification
+Redistribution and modification are permitted, provided that the following conditions are met:
+
+The original copyright notice and this license are retained.
+
+Any derivative works must also be licensed under these same terms.
+
+Proper credit is given to the original author(s) of the Software.
+
+Disclaimer
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Third-Party Dependencies
+The AI feature utilizes OpenAI's API services. Users are responsible for reviewing and complying with the terms and licenses of these external dependencies.

@@ -1,16 +1,16 @@
 import os
 import numpy as np
 from FAISSMetadataIndex import FAISSMetadataIndex
-from sentence_transformers import SentenceTransformer
+from OpenAIHelper import OpenAIHelper
 
 class IndexSearch:
-    def __init__(self, encoder="jhgan/ko-sroberta-multitask"):
+    def __init__(self):
         self.debug = False
-        self.indexer = FAISSMetadataIndex(encoder=encoder)
-        self.model = SentenceTransformer(encoder)
+        self.indexer = FAISSMetadataIndex()
+        self.model = OpenAIHelper()
 
     def get_query_embedding(self, query):
-        return self.model.encode([query])[0]
+        return self.model.encode(query)
 
     def get_all_results(self, directory, query, k=10):
         query_vector = self.get_query_embedding(query)
@@ -18,7 +18,7 @@ class IndexSearch:
         for root, _, files in os.walk(directory):
             for file in files:
                 if file.endswith('.faiss'):
-                    print(f"Found .faiss file: {file}")
+                    if self.debug: print(f"Found .faiss file: {file}")
                     base_name = os.path.splitext(os.path.basename(file))[0]
                     metadata_filename = base_name + ".metadata"
                     if not os.path.isfile(os.path.join(root, metadata_filename)):

@@ -3,6 +3,9 @@ from docx import Document
 from docx.text.paragraph import Paragraph
 import re
 from FAISSMetadataIndex import FAISSMetadataIndex
+from Timer import Timer
+from DurationStats import DurationStats
+import time
 
 class DocumentProcessor:
     def __init__(self, min_words=500, overlap=50, file_save_threshold=50):
@@ -14,6 +17,7 @@ class DocumentProcessor:
         self.process_finished = False
         self.indexer = FAISSMetadataIndex()
         self.file_count = 0
+        self.chunks = []
     
     def process_file(self, file_path):
         file = os.path.basename(file_path)
@@ -38,7 +42,7 @@ class DocumentProcessor:
                 if self.debug: print(f"Adding {len(words)} words. New word count: {word_count}")
                 if word_count >= self.min_words + self.overlap:
                     # save text
-                    self.indexer.add_document({
+                    self.chunks.append({
                         "text": "\n    ".join(pre_overlap_text + text + post_overlap_text),
                         "metadata": {
                             "path": file_path,
@@ -47,8 +51,6 @@ class DocumentProcessor:
                             "title": title
                         }
                     })
-                    # if self.debug: print(f"Adding chunk\n {pre_overlap_text + text + post_overlap_text}\n")
-                    # change post to pre and reset
                     pre_overlap_text = post_overlap_text
                     post_overlap_text = []
                     text = []
@@ -63,7 +65,7 @@ class DocumentProcessor:
             
             # add any remaining
             if len(text):
-                self.indexer.add_document({
+                self.chunks.append({
                     "text": "\n    ".join(pre_overlap_text + text + post_overlap_text),
                     "metadata": {
                         "path": file_path,
@@ -73,6 +75,10 @@ class DocumentProcessor:
                     }
                 })
             
+            chunks = self.chunks
+            if self.debug: print(f"Adding documents total: {self.file_count}. Chunks: {len(chunks)}")
+            self.indexer.add_documents_bulk(chunks)
+            self.chunks = []
             self.file_count += 1
             self.processed_files_count += 1
 

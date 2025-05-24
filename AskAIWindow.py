@@ -21,6 +21,7 @@ class FileProcessingWorker(QObject):
         self.file_save_threshold = 50
         self.error_threshold = 5
         self.file_processed = 0
+        self.processor = DocumentProcessor()
 
     def run(self):
         dir_path = self.directory
@@ -34,20 +35,19 @@ class FileProcessingWorker(QObject):
         self.finished.emit()
     
     def __run(self, dir_path):
-        processor = DocumentProcessor()
         file_count = 0
         error_count = 0
         for file in os.listdir(dir_path):
             file_path = os.path.join(dir_path, file)
             if os.path.isfile(file_path) and file.endswith(".docx"):
                 try:
-                    processor.process_file(file_path)
+                    self.processor.process_file(file_path)
                     # if number of files > 50, save
                     file_count +=1
                     self.file_processed += 1
                     self.progress.emit(self.file_processed)
                     if file_count > self.file_save_threshold:
-                        processor.save_progress(dir_path)
+                        self.processor.save_progress(dir_path)
                         file_count = 0
                 except Exception as e:
                     error_count += 1
@@ -56,7 +56,7 @@ class FileProcessingWorker(QObject):
                         self.finished.emit()
                         return
         if file_count:
-            processor.save_progress(dir_path)
+            self.processor.save_progress(dir_path)
 
 class AIWorker(QObject):
     finished = pyqtSignal(str, list)  # response text and search results

@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "docxearch"
-#define MyAppVersion "3.0"
+#define MyAppVersion "3.2"
 #define MyAppPublisher "Jung Il Oh"
 #define MyAppExeName "docxearch.exe"
 

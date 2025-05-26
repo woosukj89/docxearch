@@ -9,6 +9,7 @@ from DocumentProcessor import DocumentProcessor
 from IndexSearch import IndexSearch
 from DocumentProcessor import DocumentProcessor
 from OpenAIHelper import OpenAIHelper
+import math
 
 class FileProcessingWorker(QObject):
     progress = pyqtSignal(int)
@@ -25,16 +26,32 @@ class FileProcessingWorker(QObject):
 
     def run(self):
         dir_path = self.directory
-        self.__run(dir_path)
+        if not self.__index_complete(dir_path):
+            self.__remove_all_faiss_metadata(dir_path)
+            self.__run(dir_path)
         # do it subsequently for all subpaths
         for name in os.listdir(dir_path):
             subpath = os.path.join(dir_path, name)
-            if os.path.isdir(subpath):
+            if os.path.isdir(subpath) and not self.__index_complete(subpath):
+                self.__remove_all_faiss_metadata(subpath)
                 self.__run(subpath)
         
         self.finished.emit()
     
+    def __index_complete(self, directory):
+        docx_count = sum(1 for f in os.scandir(directory) if f.name.endswith(".docx") and f.is_file())
+        faiss_count = sum(1 for f in os.scandir(directory) if f.name.endswith(".faiss") and f.is_file())
+        metadata_count = sum(1 for f in os.scandir(directory) if f.name.endswith(".metadata") and f.is_file())
+
+        return math.ceil(docx_count / self.file_save_threshold) <= faiss_count and faiss_count == metadata_count
+    
+    def __remove_all_faiss_metadata(self, directory):
+        for entry in os.scandir(directory):
+            if entry.is_file() and (entry.name.endswith(".faiss") or entry.name.endswith(".metadata")):
+                os.remove(entry.path)
+    
     def __run(self, dir_path):
+        print(f"Running processor for path {dir_path}")
         file_count = 0
         error_count = 0
         for file in os.listdir(dir_path):
@@ -130,10 +147,7 @@ class AskAIWindow(QWidget):
     
     def initialize_ai(self):
         self.display_user_question(self.query)
-        if not self.searcher.check_index_exists(self.directory):
-            self.start_processing_in_thread()
-        else:
-            self.ask_ai()
+        self.start_processing_in_thread()
     
     def count_docx_files(self, directory: str) -> int:
         count = 0
@@ -145,7 +159,7 @@ class AskAIWindow(QWidget):
         # Count files in a blocking way (quick), or move this to thread too if slow
         total_files = self.count_docx_files(self.directory)
 
-        self.progress_dialog = QProgressDialog("폴더에서 문서를 처리하는 중입니다. 문서마다 1분 정도 소요됩니다. 이 작업은 폴더당 한 번만 수행합니다.", 
+        self.progress_dialog = QProgressDialog("폴더에서 문서를 처리하는 중입니다. 문서마다 20초 정도 소요됩니다. 이 작업은 폴더당 한 번만 수행합니다.", 
                                                None, 0, total_files, self)
         self.progress_dialog.setWindowModality(Qt.WindowModal)
         self.progress_dialog.setMinimumDuration(0)
